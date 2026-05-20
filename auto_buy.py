@@ -39,11 +39,11 @@ MIN_QTY = 5                              # Jumlah minimum order
 MAX_QTY = 7                              # Jumlah maksimum order
 
 # Pengaturan delay (detik)
-DELAY_AFTER_MENU = 3                     # Delay setelah kirim Menu
-DELAY_AFTER_PRODUCT = 3                  # Delay setelah pilih produk
-DELAY_AFTER_QTY = 3                      # Delay setelah kirim jumlah
-DELAY_AFTER_BAYAR = 5                    # Delay setelah klik Bayar Sekarang
-DELAY_RETRY = 5                          # Delay sebelum retry dari awal
+DELAY_AFTER_MENU = 2                     # Delay setelah kirim Menu
+DELAY_AFTER_PRODUCT = 2                  # Delay setelah pilih produk
+DELAY_AFTER_QTY = 2                      # Delay setelah kirim jumlah
+DELAY_AFTER_BAYAR = 3                    # Delay setelah klik Bayar Sekarang
+DELAY_RETRY = 2                          # Delay sebelum retry dari awal
 DELAY_ORDER_CLOSED = 10                  # Delay saat order ditutup (polling)
 
 # Pengaturan loop
@@ -183,7 +183,7 @@ class AutoBuyer:
         await asyncio.sleep(DELAY_AFTER_MENU)
 
         # Tunggu respon list product
-        await asyncio.wait_for(self.wait_for_event(), timeout=15)
+        await asyncio.wait_for(self.wait_for_event(), timeout=10)
 
         # Cek apakah order ditutup
         if self.state == STATE_ORDER_CLOSED:
@@ -202,11 +202,13 @@ class AutoBuyer:
         await asyncio.sleep(DELAY_AFTER_PRODUCT)
 
         # Tunggu respon produk dipilih
-        await asyncio.wait_for(self.wait_for_event(), timeout=15)
+        await asyncio.wait_for(self.wait_for_event(), timeout=10)
 
-        # Cek apakah order ditutup
+        # Cek apakah order ditutup atau stok habis
         if self.state == STATE_ORDER_CLOSED:
             return "order_closed"
+        if self.state == STATE_IDLE:
+            return "stock_empty"
 
         # Step 3: Masukkan jumlah order (random 5-7)
         log.info(f"Step 3: Memasukkan jumlah order: {self.current_qty}...")
@@ -216,7 +218,7 @@ class AutoBuyer:
         await asyncio.sleep(DELAY_AFTER_QTY)
 
         # Tunggu respon detail order
-        await asyncio.wait_for(self.wait_for_event(), timeout=15)
+        await asyncio.wait_for(self.wait_for_event(), timeout=10)
 
         # Cek apakah stok habis atau order ditutup
         if self.state == STATE_ORDER_CLOSED:
@@ -239,7 +241,7 @@ class AutoBuyer:
         await asyncio.sleep(DELAY_AFTER_BAYAR)
 
         # Tunggu respon pembayaran
-        await asyncio.wait_for(self.wait_for_event(), timeout=30)
+        await asyncio.wait_for(self.wait_for_event(), timeout=15)
 
         # Cek hasil
         if self.state == STATE_DONE:
@@ -264,8 +266,10 @@ class AutoBuyer:
             self.event_received.set()
             return
 
-        # Cek apakah stok habis
-        if "❌" in text or "stok baru saja habis" in text.lower() or "Stok tidak cukup" in text:
+        # Cek apakah stok habis (semua variasi respon)
+        if ("❌" in text or "stok baru saja habis" in text.lower() or
+                "Stok tidak cukup" in text or "stok produk ini habis" in text.lower() or
+                "stok habis" in text.lower() or "out of stock" in text.lower()):
             log.warning("Detected: STOK HABIS!")
             self.state = STATE_IDLE
             self.event_received.set()
@@ -280,6 +284,10 @@ class AutoBuyer:
         elif self.state == STATE_WAIT_PRODUCT_SELECTED:
             if "PRODUK DIPILIH" in text or "Masukkan jumlah order" in text:
                 log.info("Received: Produk dipilih")
+                self.event_received.set()
+            elif "stok" in text.lower() and "habis" in text.lower():
+                log.warning("Stok habis saat pilih produk!")
+                self.state = STATE_IDLE
                 self.event_received.set()
 
         elif self.state == STATE_WAIT_ORDER_DETAIL:
